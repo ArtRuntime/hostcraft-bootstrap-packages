@@ -16,28 +16,29 @@ def main():
     # Extensions to modify
     text_extensions = {
         '.sh', '.py', '.properties', '.conf', '.txt', '.json', '.yml', 
-        '.patch', '.c', '.cpp', '.h', '.mk', '.in', '.ac', '.am', 
         'Makefile', 'configure', 'status'
     }
     
-    skipped_dirs = {'.git', '.github', '.termux-build', 'output', 'debs'}
+    # Strictly ignore package recipe and patch directories, git metadata, and build caches
+    skipped_dirs = {
+        '.git', '.github', '.termux-build', 'output', 'debs',
+        'packages', 'x11-packages', 'root-packages', 'disabled-packages'
+    }
     
     modified_count = 0
     
     for root, dirs, files in os.walk(repo_dir):
-        # Skip hidden/build directories
+        # Skip directories in-place
         dirs[:] = [d for d in dirs if d not in skipped_dirs]
         
         for file in files:
             file_path = os.path.join(root, file)
             
-            # Check extension or basename match
             basename = os.path.basename(file_path)
             _, ext = os.path.splitext(basename)
             
             if ext in text_extensions or basename in text_extensions:
                 try:
-                    # Read binary first to prevent decode crashes
                     with open(file_path, 'rb') as f:
                         content = f.read()
                     
