@@ -13,7 +13,6 @@ on:
         required: true
         default: 'com.hostcraft.android'
 
-
 permissions:
   contents: write
 
@@ -28,6 +27,11 @@ jobs:
       - name: Checkout builder repo
         uses: actions/checkout@v4
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl jq xz-utils zip
+
       - name: Clone termux-packages
         run: |
           git clone --depth 1 https://github.com/termux/termux-packages.git termux-packages
@@ -37,50 +41,41 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Patch termux-packages source paths
-        run: |
-          python3 patch_prefix.py termux-packages "${{ github.event.inputs.package_name || 'com.hostcraft.android' }}"
-
-      - name: Build bootstrap packages
+      - name: Generate bootstrap archive (from official Termux repo)
         run: |
           cd termux-packages
-          # Build core bootstrap packages for the target architecture
-          # -I: Install dependencies, -C: Clean build directory
-          ./scripts/run-docker.sh ./build-package.sh -a ${{ matrix.arch }} -I -C bash apt dpkg coreutils tar grep sed gzip xz-utils curl termux-tools termux-exec
+          ./scripts/generate-bootstraps.sh --architectures ${{ matrix.arch }}
 
-      - name: Set up local APT repository
+      - name: Post-process bootstrap (replace com.termux)
         run: |
-          cd termux-packages
-          # Create repository directories
-          mkdir -p repo/dists/stable/main/binary-${{ matrix.arch }}
-          mkdir -p repo/dists/stable/main/binary-all
-          
-          # Copy compiled debs
-          cp output/*.deb repo/dists/stable/main/binary-${{ matrix.arch }}/ || true
-          
-          # Generate Packages index
-          cd repo/dists/stable/main/binary-${{ matrix.arch }}
-          dpkg-scanpackages . /dev/null > Packages
-          bzip2 -k Packages
-          
-          # Generate Packages index for 'all' arch
-          cd ../binary-all
-          touch Packages
-          bzip2 -k Packages
+          PACKAGE_NAME="${{ github.event.inputs.package_name || 'com.hostcraft.android' }}"
+          ARCH="${{ matrix.arch }}"
 
-      - name: Generate bootstrap archive
-        run: |
           cd termux-packages
-          # Start a local HTTP server to serve the APT repository
-          python3 -m http.server 8080 --directory repo &
-          SERVER_PID=$!
-          sleep 3
-          
-          # Run the generate-bootstraps script pointing to our local repository
-          ./scripts/generate-bootstraps.sh --architectures ${{ matrix.arch }} --repository http://localhost:8080/dists/stable/main
-          
-          # Kill the local server
-          kill $SERVER_PID
+
+          # Unzip the bootstrap
+          mkdir -p bootstrap-extracted
+          cd bootstrap-extracted
+          unzip -o ../bootstrap-${ARCH}.zip
+
+          # Run the patch script on the extracted content
+          cd ..
+          python3 ../patch_prefix.py bootstrap-extracted "$PACKAGE_NAME"
+
+          # Also patch SYMLINKS.txt if it exists
+          if [ -f bootstrap-extracted/SYMLINKS.txt ]; then
+            sed -i "s|com.termux|${PACKAGE_NAME}|g" bootstrap-extracted/SYMLINKS.txt
+            echo "[+] Patched SYMLINKS.txt"
+          fi
+
+          # Re-zip the bootstrap
+          rm -f bootstrap-${ARCH}.zip
+          cd bootstrap-extracted
+          zip -r9 ../bootstrap-${ARCH}.zip ./*
+          cd ..
+          rm -rf bootstrap-extracted
+
+          echo "[*] Re-packaged bootstrap-${ARCH}.zip with prefix: ${PACKAGE_NAME}"
 
       - name: Upload bootstrap zip as artifact
         uses: actions/upload-artifact@v4
@@ -91,7 +86,7 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     steps:
       - name: Download all bootstrap artifacts
         uses: actions/download-artifact@v4
@@ -110,9 +105,12 @@ jobs:
           tag_name: ${{ steps.get_version.outputs.version }}
           name: Custom Bootstrap Release ${{ steps.get_version.outputs.version }}
           body: |
-            Automatically compiled custom bootstrap packages for Termux environment.
-            
-            Compiled prefix: `/data/data/${{ github.event.inputs.package_name || 'com.hostcraft.android' }}/files/usr`
+            Custom bootstrap archives with patched prefix for HostCraft.
+
+            Patched prefix: `/data/data/${{ github.event.inputs.package_name || 'com.hostcraft.android' }}/files/usr`
+
+            Text config files have `com.termux` replaced with the custom package name.
+            ELF binaries retain original hardcoded paths (handled at runtime by the app).
           files: bootstraps/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
