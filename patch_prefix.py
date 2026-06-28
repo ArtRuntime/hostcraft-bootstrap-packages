@@ -10,48 +10,28 @@ def main():
     repo_dir = os.path.abspath(sys.argv[1])
     new_package = sys.argv[2] if len(sys.argv) > 2 else "com.hostcraft.android"
     
-    print(f"[*] Patching termux-packages in: {repo_dir}")
+    properties_file = os.path.join(repo_dir, "scripts", "properties.sh")
+    if not os.path.exists(properties_file):
+        print(f"[!] properties.sh not found at {properties_file}")
+        sys.exit(1)
+        
+    print(f"[*] Patching properties.sh: {properties_file}")
     print(f"[*] Target package name: {new_package}")
     
-    # Extensions to modify
-    text_extensions = {
-        '.sh', '.py', '.properties', '.conf', '.txt', '.json', '.yml', 
-        'Makefile', 'configure', 'status'
-    }
-    
-    # Strictly ignore package recipe and patch directories, git metadata, and build caches
-    skipped_dirs = {
-        '.git', '.github', '.termux-build', 'output', 'debs',
-        'packages', 'x11-packages', 'root-packages', 'disabled-packages'
-    }
-    
-    modified_count = 0
-    
-    for root, dirs, files in os.walk(repo_dir):
-        # Skip directories in-place
-        dirs[:] = [d for d in dirs if d not in skipped_dirs]
+    try:
+        with open(properties_file, 'rb') as f:
+            content = f.read()
         
-        for file in files:
-            file_path = os.path.join(root, file)
-            
-            basename = os.path.basename(file_path)
-            _, ext = os.path.splitext(basename)
-            
-            if ext in text_extensions or basename in text_extensions:
-                try:
-                    with open(file_path, 'rb') as f:
-                        content = f.read()
-                    
-                    if b'com.termux' in content:
-                        patched = content.replace(b'com.termux', new_package.encode('utf-8'))
-                        with open(file_path, 'wb') as f:
-                            f.write(patched)
-                        print(f"[+] Patched: {os.path.relpath(file_path, repo_dir)}")
-                        modified_count += 1
-                except Exception as e:
-                    print(f"[!] Error processing {file_path}: {e}")
-                    
-    print(f"[*] Done. Patched {modified_count} files.")
+        if b'com.termux' in content:
+            patched = content.replace(b'com.termux', new_package.encode('utf-8'))
+            with open(properties_file, 'wb') as f:
+                f.write(patched)
+            print("[+] Patched properties.sh successfully.")
+        else:
+            print("[!] com.termux not found in properties.sh.")
+    except Exception as e:
+        print(f"[!] Error patching properties.sh: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
