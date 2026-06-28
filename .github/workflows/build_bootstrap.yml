@@ -108,9 +108,5 @@ jobs:
             Custom bootstrap archives with patched prefix for HostCraft.
 
             Patched prefix: `/data/data/${{ github.event.inputs.package_name || 'com.hostcraft.android' }}/files/usr`
-
-            Text config files have `com.termux` replaced with the custom package name.
             ELF binaries retain original hardcoded paths (handled at runtime by the app).
           files: bootstraps/*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
