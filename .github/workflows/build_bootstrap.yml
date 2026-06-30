@@ -44,6 +44,32 @@ jobs:
       - name: Generate bootstrap archive (from official Termux repo)
         run: |
           cd termux-packages
+          python3 -c '
+          import re, sys
+          with open("scripts/generate-bootstraps.sh", "r") as f:
+              code = f.read()
+          pattern = r"# Package manager\..*?pull_package unzip"
+          replacement = """# Minimal packages for HostCraft Minecraft Server
+          \tpull_package bash
+          \tpull_package coreutils
+          \tpull_package tar
+          \tpull_package xz-utils
+          \tpull_package libandroid-shmem
+          \tpull_package libandroid-spawn
+          \tpull_package libiconv
+          \tpull_package libjpeg-turbo
+          \tpull_package littlecms"""
+          modified_code, count = re.subn(pattern, replacement, code, flags=re.DOTALL)
+          if count == 0:
+              print("Error: Could not find package list block in generate-bootstraps.sh")
+              sys.exit(1)
+          second_stage_pattern = r"add_termux_bootstrap_second_stage_files \"\$package_arch\""
+          second_stage_replacement = "# add_termux_bootstrap_second_stage_files \"$package_arch\""
+          modified_code, sec_count = re.subn(second_stage_pattern, second_stage_replacement, modified_code)
+          with open("scripts/generate-bootstraps.sh", "w") as f:
+              f.write(modified_code)
+          print(f"Successfully patched generate-bootstraps.sh (packages={count}, second_stage={sec_count})")
+          '
           ./scripts/generate-bootstraps.sh --architectures ${{ matrix.arch }}
 
       - name: Post-process bootstrap (replace com.termux)
